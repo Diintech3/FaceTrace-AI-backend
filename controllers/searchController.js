@@ -35,7 +35,14 @@ class SearchController {
 
       console.log('[Controller] Image search started for:', req.file.filename);
       const imagePath = req.file.path;
-      const results = await aggregatorService.searchByImage(imagePath);
+      
+      // Get optional username hint from request
+      const usernameHint = req.body.username || null;
+      if (usernameHint) {
+        console.log('[Controller] Username hint provided:', usernameHint);
+      }
+      
+      const results = await aggregatorService.searchByImage(imagePath, usernameHint);
       console.log('[Controller] Image search completed:', results);
 
       // Delete image after processing

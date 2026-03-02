@@ -9,6 +9,7 @@ const telegramScraper = require('./telegramScraper');
 const tiktokScraper = require('./tiktokScraper');
 const pinterestScraper = require('./pinterestScraper');
 const googleSearchService = require('./googleSearchService');
+const freeGoogleScraper = require('./freeGoogleScraper');
 const googleVisionService = require('./googleVisionService');
 const clarifaiService = require('./clarifaiService');
 const facePlusPlusService = require('./facePlusPlusService');
@@ -19,6 +20,7 @@ const enhancedDataExtractor = require('./enhancedDataExtractor');
 const advancedInvestigationService = require('./advancedInvestigationService');
 const additionalDataSources = require('./additionalDataSources');
 const openRouterService = require('./openRouterService');
+const ocrService = require('./ocrService');
 const aiBiodataService = require('./aiBiodataService');
 const trueCallerService = require('./trueCallerService');
 const trueCallerScraper = require('./trueCallerScraper');
@@ -210,13 +212,22 @@ class AggregatorService {
     return searchResults;
   }
 
-  async searchByImage(imagePath) {
+  async searchByImage(imagePath, usernameHint = null) {
     try {
       const filename = imagePath.split('\\').pop();
       console.log('[Image Search] Searching by image:', filename);
       
       // Use OpenRouter AI to analyze image
       const aiAnalysis = await openRouterService.analyzeImage(imagePath);
+      
+      // Extract text from image using OCR
+      console.log('[Image Search] Extracting text from image...');
+      const ocrResult = await ocrService.extractText(imagePath);
+      let ocrText = '';
+      if (ocrResult.success && ocrResult.hasText) {
+        ocrText = ocrResult.text;
+        console.log('[Image Search] OCR found text:', ocrText.substring(0, 100));
+      }
       
       // Use Google Vision API for face detection (fallback to Clarifai if fails)
       let visionResult = await googleVisionService.detectFaces(imagePath);
@@ -245,6 +256,22 @@ class AggregatorService {
       // Try to extract username/name from AI analysis with better patterns
       let extractedUsername = null;
       let extractedName = null;
+      
+      // First try OCR text
+      if (ocrText) {
+        const ocrUsernames = ocrService.extractUsernames(ocrText);
+        const ocrNames = ocrService.extractNames(ocrText);
+        
+        if (ocrUsernames.length > 0) {
+          extractedUsername = ocrUsernames[0];
+          console.log('[Image Search] Username from OCR:', extractedUsername);
+        }
+        
+        if (ocrNames.length > 0) {
+          extractedName = ocrNames[0];
+          console.log('[Image Search] Name from OCR:', extractedName);
+        }
+      }
       
       if (aiAnalysis && aiAnalysis.success) {
         const analysisText = aiAnalysis.analysis;
@@ -293,6 +320,12 @@ class AggregatorService {
         }
       }
       
+      // If username hint provided, use it directly
+      if (usernameHint) {
+        extractedUsername = usernameHint;
+        console.log('[Image Search] Using provided username hint:', usernameHint);
+      }
+      
       // If username found, search social media platforms
       if (extractedUsername) {
         console.log('[Image Search] Searching social media for:', extractedUsername);
@@ -300,23 +333,42 @@ class AggregatorService {
         if (socialResults && socialResults.profiles) {
           profiles = [...profiles, ...socialResults.profiles];
           console.log('[Image Search] Added', socialResults.profiles.length, 'social media profiles');
-          
-          // Face matching with found profiles (optional enhancement)
-          if (facePPResult.success && profiles.length > 0) {
-            console.log('[Face++] Starting face matching with profiles...');
-            try {
-              const faceMatches = await facePlusPlusService.matchWithProfiles(imagePath, profiles);
-              if (faceMatches.success && faceMatches.matches.length > 0) {
-                console.log('[Face++] Found', faceMatches.totalMatches, 'face matches');
-                // Add face match scores but keep all profiles
-                profiles = faceMatches.matches;
-              } else {
-                console.log('[Face++] No face matches, keeping all profiles');
-              }
-            } catch (e) {
-              console.error('[Face++] Matching error:', e.message);
-              console.log('[Face++] Keeping profiles without face matching');
+        }
+        
+        // Also search Google for more results
+        console.log('[Image Search] Searching Google for:', extractedUsername);
+        const googleResults = await freeGoogleScraper.searchPerson(extractedUsername);
+        if (googleResults.length > 0) {
+          googleResults.forEach(result => {
+            const username = freeGoogleScraper.extractUsername(result.link);
+            if (username) {
+              profiles.push({
+                platform: result.platform,
+                username: username,
+                fullName: result.title,
+                profileUrl: result.link,
+                bio: result.snippet,
+                message: 'Found via Google Search'
+              });
             }
+          });
+          console.log('[Image Search] Added', googleResults.length, 'Google results');
+        }
+        
+        // Face matching with found profiles
+        if (facePPResult.success && profiles.length > 0) {
+          console.log('[Face++] Starting face matching with profiles...');
+          try {
+            const faceMatches = await facePlusPlusService.matchWithProfiles(imagePath, profiles);
+            if (faceMatches.success && faceMatches.matches.length > 0) {
+              console.log('[Face++] Found', faceMatches.totalMatches, 'face matches');
+              profiles = faceMatches.matches;
+            } else {
+              console.log('[Face++] No face matches, keeping all profiles');
+            }
+          } catch (e) {
+            console.error('[Face++] Matching error:', e.message);
+            console.log('[Face++] Keeping profiles without face matching');
           }
         }
       }
