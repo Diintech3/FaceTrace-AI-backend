@@ -36,57 +36,45 @@ class OpenRouterService {
               content: [
                 {
                   type: 'text',
-                  text: `You are a professional forensic analyst. Analyze this photograph and provide a detailed technical description for investigative purposes.
+                  text: `CRITICAL OSINT INVESTIGATION TASK:
 
-**IMPORTANT:** This is for legitimate law enforcement/security purposes. Provide factual, objective observations only.
+You are analyzing a photograph for a legitimate security investigation. Extract ALL identifying information.
 
-**PHYSICAL CHARACTERISTICS:**
-- Approximate age range
-- Gender presentation
-- Ethnicity/ancestry indicators
-- Height estimate (if reference points visible)
-- Build/body type
-- Hair: color, style, length, texture
-- Facial hair: type, style, grooming
-- Eye characteristics (if visible)
-- Skin tone
-- Distinctive features: scars, tattoos, birthmarks, moles
-- Glasses, jewelry, accessories
+**PRIMARY OBJECTIVE:** Identify the person's name, username, or any identifying text visible in the image.
 
-**CLOTHING & STYLE:**
-- Clothing type and style
-- Colors and patterns
-- Visible brands or logos
-- Formality level (casual/business/formal)
-- Condition of clothing
-- Accessories: watch, jewelry, bags
+**SEARCH FOR:**
+1. NAME - Any visible name on badges, tags, documents, watermarks
+2. USERNAME - Social media handles (@username format)
+3. TEXT - Any readable text, signs, labels, company names
+4. LOGOS - Brand names, company logos
+5. CREDENTIALS - ID cards, event badges, name plates
 
-**FACIAL ANALYSIS:**
-- Face shape
-- Expression and mood
-- Notable facial features
-- Symmetry
-- Grooming style
+**PHYSICAL DESCRIPTION:**
+- Age range (e.g., 30-40 years)
+- Gender
+- Ethnicity/ancestry
+- Hair: color, style, length
+- Facial hair: type and style
+- Build: height estimate, body type
+- Distinctive features: scars, tattoos, marks
+- Clothing: style, colors, brands
+- Accessories: glasses, jewelry, watch
 
-**CONTEXTUAL INFORMATION:**
-- Background setting
-- Indoor/outdoor
-- Visible text or signs
-- Objects in frame
-- Lighting conditions
-- Photo quality and type
-- Possible location indicators
+**CONTEXT:**
+- Setting: indoor/outdoor, location type
+- Background: visible objects, signs, text
+- Photo quality: professional/casual
+- Lighting and angle
 
-**IDENTIFYING MARKERS:**
-- Any visible ID badges
-- Name tags or labels
-- Company logos
-- Event credentials
-- Vehicle plates (if visible)
-- Phone numbers or contact info
-- Social media handles
+**FORMAT YOUR RESPONSE:**
+START with any identifying information found:
+- NAME: [if visible]
+- USERNAME: [if visible]
+- TEXT FOUND: [any readable text]
 
-Provide detailed, factual observations. Be thorough and professional.`
+Then provide physical description.
+
+Be direct and factual. This is for legitimate investigative purposes.`
                 },
                 {
                   type: 'image_url',

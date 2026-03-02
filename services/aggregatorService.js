@@ -10,6 +10,8 @@ const tiktokScraper = require('./tiktokScraper');
 const pinterestScraper = require('./pinterestScraper');
 const googleSearchService = require('./googleSearchService');
 const googleVisionService = require('./googleVisionService');
+const clarifaiService = require('./clarifaiService');
+const facePlusPlusService = require('./facePlusPlusService');
 const facebookService = require('./facebookService');
 const twitterService = require('./twitterService');
 const instagramService = require('./instagramService');
@@ -216,66 +218,79 @@ class AggregatorService {
       // Use OpenRouter AI to analyze image
       const aiAnalysis = await openRouterService.analyzeImage(imagePath);
       
-      // Use Google Vision API for face detection
-      const visionResult = await googleVisionService.detectFaces(imagePath);
+      // Use Google Vision API for face detection (fallback to Clarifai if fails)
+      let visionResult = await googleVisionService.detectFaces(imagePath);
       
       if (!visionResult) {
-        console.error('[Image Search] Google Vision API failed');
+        console.log('[Image Search] Google Vision failed, trying Clarifai...');
+        visionResult = await clarifaiService.detectFaces(imagePath);
       }
 
       console.log('[Image Search] Faces detected:', visionResult?.faceCount || 0);
       
+      // Face++ detection
+      console.log('[Face++] Detecting face in uploaded image...');
+      const facePPResult = await facePlusPlusService.detectFace(imagePath);
+      console.log('[Face++] Detection result:', facePPResult.success ? 'Success' : 'Failed');
+      
       // Get social media profiles from reverse image search
       let profiles = await googleVisionService.reverseImageSearch(imagePath);
+      
+      if (profiles.length === 0) {
+        console.log('[Image Search] Google reverse search failed, trying Clarifai...');
+        const clarifaiProfiles = await clarifaiService.reverseImageSearch(imagePath);
+        profiles = [...profiles, ...clarifaiProfiles];
+      }
       
       // Try to extract username/name from AI analysis with better patterns
       let extractedUsername = null;
       let extractedName = null;
       
       if (aiAnalysis && aiAnalysis.success) {
-        const analysisText = aiAnalysis.analysis.toLowerCase();
+        const analysisText = aiAnalysis.analysis;
         
-        // Look for name patterns
-        const namePatterns = [
-          /name[:\s]+([a-z\s]+?)(?:\n|\.|,|$)/i,
-          /identified as[:\s]+([a-z\s]+?)(?:\n|\.|,|$)/i,
-          /person[:\s]+([a-z\s]+?)(?:\n|\.|,|$)/i,
-          /individual[:\s]+([a-z\s]+?)(?:\n|\.|,|$)/i
-        ];
+        // Look for NAME: or USERNAME: in response
+        const nameMatch = analysisText.match(/NAME:\s*([^\n]+)/i);
+        const usernameMatch = analysisText.match(/USERNAME:\s*@?([^\n\s]+)/i);
+        const textFoundMatch = analysisText.match(/TEXT FOUND:\s*([^\n]+)/i);
         
-        for (const pattern of namePatterns) {
-          const match = aiAnalysis.analysis.match(pattern);
-          if (match && match[1]) {
-            extractedName = match[1].trim();
-            console.log('[Image Search] Extracted name from AI:', extractedName);
-            break;
+        if (nameMatch && nameMatch[1] && !nameMatch[1].includes('not') && !nameMatch[1].includes('None')) {
+          extractedName = nameMatch[1].trim();
+          console.log('[Image Search] Extracted name from AI:', extractedName);
+        }
+        
+        if (usernameMatch && usernameMatch[1]) {
+          extractedUsername = usernameMatch[1].trim();
+          console.log('[Image Search] Extracted username from AI:', extractedUsername);
+        }
+        
+        if (textFoundMatch && textFoundMatch[1] && !textFoundMatch[1].includes('None')) {
+          const text = textFoundMatch[1].trim();
+          // Check if it looks like a username
+          if (text.length < 30 && !text.includes(' ')) {
+            extractedUsername = text.replace('@', '');
+            console.log('[Image Search] Extracted username from text:', extractedUsername);
           }
         }
         
-        // Look for social media handles
-        const usernamePatterns = [
-          /@([a-zA-Z0-9_\.]+)/g,
-          /instagram\.com\/([a-zA-Z0-9_\.]+)/gi,
-          /twitter\.com\/([a-zA-Z0-9_]+)/gi,
-          /x\.com\/([a-zA-Z0-9_]+)/gi,
-          /facebook\.com\/([a-zA-Z0-9_\.]+)/gi
-        ];
-        
-        for (const pattern of usernamePatterns) {
-          const matches = aiAnalysis.analysis.match(pattern);
-          if (matches && matches[0]) {
-            extractedUsername = matches[0].replace(/@|instagram\.com\/|twitter\.com\/|x\.com\/|facebook\.com\//gi, '');
-            console.log('[Image Search] Extracted username from AI:', extractedUsername);
-            break;
+        // Look for social media handles in format @username
+        if (!extractedUsername) {
+          const handleMatch = analysisText.match(/@([a-zA-Z0-9_]{3,30})/i);
+          if (handleMatch && handleMatch[1]) {
+            extractedUsername = handleMatch[1];
+            console.log('[Image Search] Found social handle:', extractedUsername);
           }
         }
       }
       
-      // If name found but no username, try common username variations
-      if (extractedName && !extractedUsername) {
-        // Try name as username (e.g., "Elon Musk" -> "elonmusk")
-        extractedUsername = extractedName.toLowerCase().replace(/\s+/g, '');
-        console.log('[Image Search] Generated username from name:', extractedUsername);
+      // If name found but no username, create username from name
+      if (extractedName && !extractedUsername && extractedName.length < 50) {
+        extractedUsername = extractedName.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 20);
+        if (extractedUsername.length >= 3) {
+          console.log('[Image Search] Generated username from name:', extractedUsername);
+        } else {
+          extractedUsername = null;
+        }
       }
       
       // If username found, search social media platforms
@@ -285,6 +300,24 @@ class AggregatorService {
         if (socialResults && socialResults.profiles) {
           profiles = [...profiles, ...socialResults.profiles];
           console.log('[Image Search] Added', socialResults.profiles.length, 'social media profiles');
+          
+          // Face matching with found profiles (optional enhancement)
+          if (facePPResult.success && profiles.length > 0) {
+            console.log('[Face++] Starting face matching with profiles...');
+            try {
+              const faceMatches = await facePlusPlusService.matchWithProfiles(imagePath, profiles);
+              if (faceMatches.success && faceMatches.matches.length > 0) {
+                console.log('[Face++] Found', faceMatches.totalMatches, 'face matches');
+                // Add face match scores but keep all profiles
+                profiles = faceMatches.matches;
+              } else {
+                console.log('[Face++] No face matches, keeping all profiles');
+              }
+            } catch (e) {
+              console.error('[Face++] Matching error:', e.message);
+              console.log('[Face++] Keeping profiles without face matching');
+            }
+          }
         }
       }
       
@@ -295,6 +328,7 @@ class AggregatorService {
         imagePath: imagePath,
         faceDetected: visionResult?.faceCount > 0,
         faceCount: visionResult?.faceCount || 0,
+        facePlusPlus: facePPResult,
         aiAnalysis: aiAnalysis,
         extractedUsername: extractedUsername,
         extractedName: extractedName,
