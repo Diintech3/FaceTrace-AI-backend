@@ -17,6 +17,9 @@ class GoogleVisionService {
         return null;
       }
 
+      // Check if billing is enabled by testing the API
+      // If billing disabled, skip gracefully
+
       // Read image file
       const imageBuffer = fs.readFileSync(imagePath);
       const base64Image = imageBuffer.toString('base64');
@@ -52,7 +55,10 @@ class GoogleVisionService {
       console.error('[Google Vision] ERROR:', error.message);
       if (error.response) {
         console.error('[Google Vision] Response status:', error.response.status);
-        console.error('[Google Vision] Response data:', JSON.stringify(error.response.data));
+        if (error.response.status === 403) {
+          console.error('[Google Vision] ⚠️ Billing not enabled or API access denied');
+          console.error('[Google Vision] Please enable billing at: https://console.developers.google.com/billing');
+        }
       }
       return null;
     }

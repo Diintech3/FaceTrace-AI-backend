@@ -13,6 +13,7 @@ const freeGoogleScraper = require('./freeGoogleScraper');
 const googleVisionService = require('./googleVisionService');
 const clarifaiService = require('./clarifaiService');
 const facePlusPlusService = require('./facePlusPlusService');
+const azureFaceService = require('./azureFaceService');
 const facebookService = require('./facebookService');
 const twitterService = require('./twitterService');
 const instagramService = require('./instagramService');
@@ -96,6 +97,34 @@ class AggregatorService {
           });
         }
       }
+    }
+
+    // Free Google scraper: supplement for max data (fallback when Google API 403)
+    try {
+      console.log('[Aggregator] Running Free Google Scraper...');
+        const googleResults = await freeGoogleScraper.searchPerson(username);
+        if (googleResults && googleResults.length > 0) {
+          const existingUrls = new Set(profiles.map(p => p.profileUrl));
+          let added = 0;
+          googleResults.forEach(result => {
+            if (!existingUrls.has(result.link)) {
+              existingUrls.add(result.link);
+              const u = freeGoogleScraper.extractUsername(result.link) || username;
+              profiles.push({
+                platform: result.platform,
+                username: u,
+                fullName: result.title,
+                profileUrl: result.link,
+                bio: result.snippet,
+                message: 'Found via Google Scraper'
+              });
+              added++;
+            }
+          });
+          if (added > 0) console.log('[Aggregator] Free Google Scraper added', added, 'profiles');
+        }
+    } catch (e) {
+      console.error('[Aggregator] Free Google Scraper error:', e.message);
     }
 
     console.log('Total profiles found:', profiles.length);
@@ -229,6 +258,16 @@ class AggregatorService {
         console.log('[Image Search] OCR found text:', ocrText.substring(0, 100));
       }
       
+      // Azure Face API detection (PRIORITY - Basic detection only)
+      console.log('[Azure Face] Detecting face in uploaded image...');
+      const azureFaceResult = await azureFaceService.detectFace(imagePath);
+      if (azureFaceResult.success) {
+        console.log('[Azure Face] ✅ Face detected - Count:', azureFaceResult.faceCount);
+        console.log('[Azure Face] Detection model:', azureFaceResult.detectionModel);
+      } else {
+        console.log('[Azure Face] ⚠️ Face detection failed:', azureFaceResult.message);
+      }
+      
       // Use Google Vision API for face detection (fallback to Clarifai if fails)
       let visionResult = await googleVisionService.detectFaces(imagePath);
       
@@ -326,6 +365,10 @@ class AggregatorService {
         console.log('[Image Search] Using provided username hint:', usernameHint);
       }
       
+      let additionalDataSources = null;
+      let advancedInvestigation = null;
+      let aiBiodata = null;
+
       // If username found, search social media platforms
       if (extractedUsername) {
         console.log('[Image Search] Searching social media for:', extractedUsername);
@@ -333,29 +376,35 @@ class AggregatorService {
         if (socialResults && socialResults.profiles) {
           profiles = [...profiles, ...socialResults.profiles];
           console.log('[Image Search] Added', socialResults.profiles.length, 'social media profiles');
+          additionalDataSources = socialResults.additionalDataSources;
+          advancedInvestigation = socialResults.advancedInvestigation;
+          aiBiodata = socialResults.aiBiodata;
         }
         
         // Also search Google for more results
         console.log('[Image Search] Searching Google for:', extractedUsername);
         const googleResults = await freeGoogleScraper.searchPerson(extractedUsername);
         if (googleResults.length > 0) {
+          const existingUrls = new Set(profiles.map(p => p.profileUrl));
           googleResults.forEach(result => {
-            const username = freeGoogleScraper.extractUsername(result.link);
-            if (username) {
+            if (!existingUrls.has(result.link)) {
+              existingUrls.add(result.link);
+              const u = freeGoogleScraper.extractUsername(result.link) || extractedUsername;
               profiles.push({
                 platform: result.platform,
-                username: username,
+                username: u,
                 fullName: result.title,
                 profileUrl: result.link,
                 bio: result.snippet,
-                message: 'Found via Google Search'
+                message: 'Found via Google Scraper'
               });
             }
           });
           console.log('[Image Search] Added', googleResults.length, 'Google results');
         }
         
-        // Face matching with found profiles
+        // Azure Face matching disabled (requires approval)
+        // Face++ matching (primary method)
         if (facePPResult.success && profiles.length > 0) {
           console.log('[Face++] Starting face matching with profiles...');
           try {
@@ -375,17 +424,25 @@ class AggregatorService {
       
       console.log('[Image Search] Total profiles found:', profiles.length);
       
+      const faceCount = azureFaceResult.faceCount || visionResult?.faceCount || (facePPResult.success && facePPResult.faces?.length) || 0;
+      const faceDetected = azureFaceResult.success || (visionResult?.faceCount || 0) > 0 || (facePPResult.success && (facePPResult.faces?.length || 0) > 0);
+      const faceSource = azureFaceResult.success ? 'Azure Face API' : visionResult?.faceCount ? 'Google Vision/Clarifai' : facePPResult.success ? 'Face++' : 'None';
       return {
-        message: `Face detection: ${visionResult?.faceCount || 0} face(s) found`,
+        message: `Face detection: ${faceSource} - ${faceCount} face(s) found`,
+        username: extractedUsername || usernameHint || null,
         imagePath: imagePath,
-        faceDetected: visionResult?.faceCount > 0,
-        faceCount: visionResult?.faceCount || 0,
+        faceDetected,
+        faceCount,
+        azureFace: azureFaceResult,
         facePlusPlus: facePPResult,
         aiAnalysis: aiAnalysis,
         extractedUsername: extractedUsername,
         extractedName: extractedName,
         profiles: profiles,
         totalFound: profiles.length,
+        additionalDataSources: additionalDataSources,
+        advancedInvestigation: advancedInvestigation,
+        aiBiodata: aiBiodata,
         searchedAt: new Date()
       };
     } catch (error) {

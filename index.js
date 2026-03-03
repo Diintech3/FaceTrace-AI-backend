@@ -24,7 +24,7 @@ connectDB();
 // Routes
 app.get('/', (req, res) => {
   res.json({
-    message: '🚀 FaceTrace AI Backend Running',
+    message: '🚀 DigitalTrace AI Backend Running',
     endpoints: {
       searchByUsername: 'POST /api/search/username',
       searchByImage: 'POST /api/search/image',

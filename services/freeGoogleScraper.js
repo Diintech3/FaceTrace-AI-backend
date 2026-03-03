@@ -78,10 +78,57 @@ class FreeGoogleScraper {
         }
       });
 
-      return results;
+      if (results.length > 0) return results;
+
+      // Fallback: Google may block automated scraping. Try DuckDuckGo HTML.
+      return await this.duckDuckGoSearch(query);
     } catch (error) {
-      return [];
+      // Fallback to DuckDuckGo HTML if Google fails
+      try {
+        return await this.duckDuckGoSearch(query);
+      } catch (e) {
+        return [];
+      }
     }
+  }
+
+  async duckDuckGoSearch(query) {
+    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+
+    const response = await axios.get(searchUrl, {
+      headers: {
+        ...this.headers,
+        'Accept-Encoding': 'gzip, deflate, br'
+      },
+      timeout: 15000,
+      validateStatus: (status) => status < 500
+    });
+
+    const $ = cheerio.load(response.data);
+    const results = [];
+
+    $('.result').each((i, elem) => {
+      const title = $(elem).find('.result__title').text().trim();
+      const link =
+        $(elem).find('.result__url').attr('href') ||
+        $(elem).find('.result__a').attr('href');
+      const snippet = $(elem).find('.result__snippet').text().trim();
+
+      if (title && link && link.startsWith('http')) {
+        const platform = this.detectPlatform(link);
+        if (platform) {
+          results.push({
+            platform,
+            title,
+            link,
+            snippet,
+            source: 'DuckDuckGo HTML'
+          });
+        }
+      }
+    });
+
+    return results;
   }
 
   detectPlatform(url) {

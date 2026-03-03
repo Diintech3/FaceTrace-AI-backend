@@ -15,7 +15,10 @@ class YouTubeService {
 
       console.log('[YouTube] Searching channel...');
       const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${username}&key=${apiKey}`;
-      const searchResponse = await axios.get(searchUrl);
+      const searchResponse = await axios.get(searchUrl, {
+        timeout: 15000,
+        validateStatus: (status) => status < 500
+      });
 
       console.log('[YouTube] Search response status:', searchResponse.status);
       
@@ -29,7 +32,10 @@ class YouTubeService {
 
       console.log('[YouTube] Fetching channel details...');
       const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelId}&key=${apiKey}`;
-      const channelResponse = await axios.get(channelUrl);
+      const channelResponse = await axios.get(channelUrl, {
+        timeout: 15000,
+        validateStatus: (status) => status < 500
+      });
 
       const channel = channelResponse.data.items[0];
       console.log('[YouTube] Channel found:', channel.snippet.title);
