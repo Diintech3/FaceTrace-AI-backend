@@ -35,18 +35,23 @@ class EnhancedContactExtractor {
         });
       }
 
-      // Phone patterns
+      // Phone patterns - Indian and US
       const phonePatterns = [
         /\+91[\s-]?[6-9]\d{9}/g,
         /[6-9]\d{9}/g,
         /\+1[\s-]?\d{10}/g
       ];
 
+      const seen = new Set();
       phonePatterns.forEach(pattern => {
-        const phones = pageText.match(pattern);
-        if (phones) {
-          phones.forEach(phone => contacts.phones.push(phone.trim()));
-        }
+        const phones = pageText.match(pattern) || [];
+        phones.forEach(phone => {
+          const p = phone.replace(/\D/g, '');
+          if (p.length >= 10 && this.isValidPhone(p) && !seen.has(p)) {
+            seen.add(p);
+            contacts.phones.push(phone.trim());
+          }
+        });
       });
 
       // Website links
@@ -100,6 +105,23 @@ class EnhancedContactExtractor {
            !email.includes('example.com') && 
            !email.includes('test.com') &&
            !email.includes('noreply');
+  }
+
+  isValidPhone(digits) {
+    if (!digits || digits.length < 10 || digits.length > 15) return false;
+    const invalid = [
+      '1234567890', '0000000000', '1111111111', '2222222222', '3333333333',
+      '4444444444', '5555555555', '6666666666', '7777777777', '8888888888', '9999999999',
+      '8666666666', '9876543210', '1231231231', '5555555555', '1000000000',
+      '2000000000', '4044044044', '5005005005'
+    ];
+    if (invalid.includes(digits)) return false;
+    const repeated = /^(\d)\1{7,}$/;
+    if (repeated.test(digits)) return false;
+    const seq = /^(0123456789|1234567890|9876543210)/;
+    if (seq.test(digits)) return false;
+    if (digits.length === 10 && digits.startsWith('0')) return false;
+    return true;
   }
 
   // Main extraction method
