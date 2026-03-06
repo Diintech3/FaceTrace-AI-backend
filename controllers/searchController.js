@@ -77,8 +77,28 @@ class SearchController {
         console.log('[Controller] Username hint provided:', usernameHint);
       }
       
+      // Try FaceCheck.id for internet-wide face search (optional - requires credits)
+      let faceCheckResults = null;
+      try {
+        const faceCheckService = require('../services/faceCheckService');
+        faceCheckResults = await faceCheckService.searchByFace(imagePath);
+        if (faceCheckResults.success && faceCheckResults.results.length > 0) {
+          console.log('[Controller] FaceCheck found', faceCheckResults.totalResults, 'matches');
+        }
+      } catch (faceCheckError) {
+        console.log('[Controller] FaceCheck skipped:', faceCheckError.message);
+        // Continue without FaceCheck results
+      }
+      
+      // Run existing aggregator search
       const results = await aggregatorService.searchByImage(imagePath, usernameHint);
-      console.log('[Controller] Image search completed:', results);
+      
+      // Merge FaceCheck results if available
+      if (faceCheckResults && faceCheckResults.success && faceCheckResults.results.length > 0) {
+        results.faceCheckResults = faceCheckResults;
+      }
+      
+      console.log('[Controller] Image search completed');
 
       // Delete image after processing
       fs.unlinkSync(imagePath);

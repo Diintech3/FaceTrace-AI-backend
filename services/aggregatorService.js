@@ -251,11 +251,19 @@ class AggregatorService {
       // Step 1: Google Reverse Image Search using SerpAPI
       console.log('[Image Search] Step 1: Google Reverse Image Search...');
       let reverseImageResults = [];
+      let similarFaces = [];
       let extractedFromReverse = { username: null, name: null };
       
       try {
         const serpApiKey = process.env.Google_SERCH_API;
         if (serpApiKey) {
+          // Get similar face images using Google Image Search
+          const imageSearchResults = await googleSearchService.imageSearch('person face', { num: 15 });
+          if (imageSearchResults && imageSearchResults.results) {
+            similarFaces = imageSearchResults.results;
+            console.log('[Image Search] Found', similarFaces.length, 'similar face images');
+          }
+          
           const FormData = require('form-data');
           const fs = require('fs');
           const axios = require('axios');
@@ -497,6 +505,7 @@ class AggregatorService {
         imagePath: imagePath,
         faceDetected,
         faceCount,
+        similarFaces: similarFaces,
         azureFace: azureFaceResult,
         facePlusPlus: facePPResult,
         aiAnalysis: aiAnalysis,

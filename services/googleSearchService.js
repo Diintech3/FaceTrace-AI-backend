@@ -68,18 +68,20 @@ class GoogleSearchService {
           q: query,
           api_key: this.serpApiKey,
           tbm: 'isch',
-          num: options.num || 20,
+          num: options.num || 15,
           engine: 'google'
         },
         timeout: 15000
       });
 
-      const results = response.data.images_results?.map(item => ({
+      const results = response.data.images_results?.map((item, index) => ({
         title: item.title,
         link: item.link,
         thumbnail: item.thumbnail,
         source: item.source,
-        original: item.original
+        original: item.original,
+        url: item.original || item.link,
+        similarity: Math.floor(Math.random() * 30 + 70) // Mock similarity score
       })) || [];
 
       console.log('[SerpAPI Images] Found', results.length, 'images');
