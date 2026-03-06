@@ -19,5 +19,9 @@ const upload = multer({ storage: storage });
 router.post('/search/username', searchController.searchByUsername);
 router.post('/search/image', upload.single('image'), searchController.searchByImage);
 router.post('/search/url', searchController.searchByUrl);
+router.post('/search/images', searchController.imageSearch);
+router.post('/search/news', searchController.newsSearch);
+router.post('/search/phone', searchController.validatePhone);
+router.post('/search/ip', searchController.lookupIP);
 
 module.exports = router;

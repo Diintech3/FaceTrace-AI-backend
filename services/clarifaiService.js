@@ -5,6 +5,8 @@ class ClarifaiService {
   constructor() {
     this.apiKey = process.env.CLARIFAI_API_KEY;
     this.baseUrl = 'https://api.clarifai.com/v2';
+    this.userId = 'clarifai';
+    this.appId = 'main';
   }
 
   async detectFaces(imagePath) {
@@ -20,8 +22,12 @@ class ClarifaiService {
       const base64Image = imageBuffer.toString('base64');
 
       const response = await axios.post(
-        `${this.baseUrl}/models/face-detection/outputs`,
+        `${this.baseUrl}/users/${this.userId}/apps/${this.appId}/models/face-detection/outputs`,
         {
+          user_app_id: {
+            user_id: this.userId,
+            app_id: this.appId
+          },
           inputs: [{
             data: {
               image: { base64: base64Image }
@@ -37,7 +43,13 @@ class ClarifaiService {
         }
       );
 
-      const regions = response.data.outputs[0].data?.regions || [];
+      if (response.data.status?.code !== 10000) {
+        console.log('[Clarifai] API Error:', response.data.status?.description);
+        return null;
+      }
+
+      const regions = response.data.outputs?.[0]?.data?.regions || [];
+      console.log('[Clarifai] ✅ Detected', regions.length, 'faces');
       
       return {
         faces: regions,
@@ -45,7 +57,7 @@ class ClarifaiService {
         success: true
       };
     } catch (error) {
-      console.error('[Clarifai] Error:', error.message);
+      console.error('[Clarifai] Error:', error.response?.data || error.message);
       return null;
     }
   }
@@ -60,8 +72,12 @@ class ClarifaiService {
       const base64Image = imageBuffer.toString('base64');
 
       const response = await axios.post(
-        `${this.baseUrl}/models/general-image-recognition/outputs`,
+        `${this.baseUrl}/users/${this.userId}/apps/${this.appId}/models/general-image-recognition/outputs`,
         {
+          user_app_id: {
+            user_id: this.userId,
+            app_id: this.appId
+          },
           inputs: [{
             data: {
               image: { base64: base64Image }
@@ -77,12 +93,17 @@ class ClarifaiService {
         }
       );
 
-      const concepts = response.data.outputs[0].data?.concepts || [];
-      console.log('[Clarifai] Found', concepts.length, 'concepts');
+      if (response.data.status?.code !== 10000) {
+        console.log('[Clarifai] API Error:', response.data.status?.description);
+        return [];
+      }
+
+      const concepts = response.data.outputs?.[0]?.data?.concepts || [];
+      console.log('[Clarifai] ✅ Found', concepts.length, 'concepts');
       
       return [];
     } catch (error) {
-      console.error('[Clarifai] Reverse search error:', error.message);
+      console.error('[Clarifai] Reverse search error:', error.response?.data || error.message);
       return [];
     }
   }

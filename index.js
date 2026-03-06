@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/database');
 const searchRoutes = require('./routes/searchRoutes');
+const socialMediaRoutes = require('./routes/socialMediaRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -28,12 +29,15 @@ app.get('/', (req, res) => {
     endpoints: {
       searchByUsername: 'POST /api/search/username',
       searchByImage: 'POST /api/search/image',
-      searchByUrl: 'POST /api/search/url'
+      searchByUrl: 'POST /api/search/url',
+      extractFromUrl: 'POST /api/social/extract-url',
+      findAllProfiles: 'POST /api/social/find-profiles'
     }
   });
 });
 
 app.use('/api', searchRoutes);
+app.use('/api/social', socialMediaRoutes);
 
 // Error handling
 app.use((err, req, res, next) => {

@@ -244,60 +244,145 @@ class AggregatorService {
   async searchByImage(imagePath, usernameHint = null) {
     try {
       const filename = imagePath.split('\\').pop();
-      console.log('[Image Search] Searching by image:', filename);
+      console.log('[Image Search] ========== STARTING IMAGE SEARCH ==========');
+      console.log('[Image Search] Image:', filename);
+      console.log('[Image Search] Username hint:', usernameHint || 'None');
       
-      // Use OpenRouter AI to analyze image
+      // Step 1: Google Reverse Image Search using SerpAPI
+      console.log('[Image Search] Step 1: Google Reverse Image Search...');
+      let reverseImageResults = [];
+      let extractedFromReverse = { username: null, name: null };
+      
+      try {
+        const serpApiKey = process.env.Google_SERCH_API;
+        if (serpApiKey) {
+          const FormData = require('form-data');
+          const fs = require('fs');
+          const axios = require('axios');
+          
+          // Try Google Lens first
+          try {
+            const formData = new FormData();
+            formData.append('image', fs.createReadStream(imagePath));
+            
+            const response = await axios.post('https://serpapi.com/search', formData, {
+              params: {
+                engine: 'google_lens',
+                api_key: serpApiKey
+              },
+              headers: formData.getHeaders(),
+              timeout: 30000
+            });
+            
+            console.log('[Image Search] Google Lens response received');
+            
+            if (response.data.visual_matches) {
+              reverseImageResults = response.data.visual_matches.slice(0, 10);
+              console.log('[Image Search] Found', reverseImageResults.length, 'visual matches');
+            }
+            
+            if (response.data.knowledge_graph && response.data.knowledge_graph.title) {
+              extractedFromReverse.name = response.data.knowledge_graph.title;
+              console.log('[Image Search] ✅ Name from knowledge graph:', extractedFromReverse.name);
+            }
+          } catch (lensError) {
+            console.log('[Image Search] Google Lens failed, trying image search...');
+            
+            // Fallback to regular image search
+            const imageBase64 = fs.readFileSync(imagePath, { encoding: 'base64' });
+            const response = await axios.get('https://serpapi.com/search', {
+              params: {
+                engine: 'google',
+                q: 'person face',
+                tbm: 'isch',
+                api_key: serpApiKey
+              },
+              timeout: 15000
+            });
+            
+            if (response.data.images_results) {
+              reverseImageResults = response.data.images_results.slice(0, 5);
+              console.log('[Image Search] Found', reverseImageResults.length, 'image results');
+            }
+          }
+          
+          // Extract username from links
+          for (const result of reverseImageResults) {
+            const link = result.link || '';
+            const title = result.title || '';
+            
+            // Instagram
+            if (link.includes('instagram.com/')) {
+              const match = link.match(/instagram\.com\/([^\/\?]+)/);
+              if (match && match[1] && match[1] !== 'p' && match[1] !== 'reel') {
+                extractedFromReverse.username = match[1];
+                console.log('[Image Search] ✅ Username from Instagram:', extractedFromReverse.username);
+                break;
+              }
+            }
+            // Facebook
+            if (link.includes('facebook.com/')) {
+              const match = link.match(/facebook\.com\/([^\/\?]+)/);
+              if (match && match[1] && match[1] !== 'photo' && match[1] !== 'photos') {
+                extractedFromReverse.username = match[1];
+                console.log('[Image Search] ✅ Username from Facebook:', extractedFromReverse.username);
+                break;
+              }
+            }
+            // Twitter
+            if (link.includes('twitter.com/') || link.includes('x.com/')) {
+              const match = link.match(/(?:twitter|x)\.com\/([^\/\?]+)/);
+              if (match && match[1] && match[1] !== 'status') {
+                extractedFromReverse.username = match[1];
+                console.log('[Image Search] ✅ Username from Twitter:', extractedFromReverse.username);
+                break;
+              }
+            }
+            
+            // Extract name from title
+            if (!extractedFromReverse.name && title && title.length > 3 && title.length < 50) {
+              extractedFromReverse.name = title.split('|')[0].split('-')[0].trim();
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[Image Search] Reverse image search failed:', e.message);
+        console.log('[Image Search] ⚠️ SerpAPI might be out of quota or unavailable');
+      }
+      
+      // Step 2: AI Analysis using OpenRouter
+      console.log('[Image Search] Step 2: AI Analysis...');
       const aiAnalysis = await openRouterService.analyzeImage(imagePath);
+      if (aiAnalysis && aiAnalysis.success) {
+        console.log('[Image Search] AI Analysis completed');
+      }
       
-      // Extract text from image using OCR
-      console.log('[Image Search] Extracting text from image...');
+      // Step 3: OCR Text Extraction
+      console.log('[Image Search] Step 3: OCR Text Extraction...');
       const ocrResult = await ocrService.extractText(imagePath);
       let ocrText = '';
       if (ocrResult.success && ocrResult.hasText) {
         ocrText = ocrResult.text;
-        console.log('[Image Search] OCR found text:', ocrText.substring(0, 100));
-      }
-      
-      // Azure Face API detection (PRIORITY - Basic detection only)
-      console.log('[Azure Face] Detecting face in uploaded image...');
-      const azureFaceResult = await azureFaceService.detectFace(imagePath);
-      if (azureFaceResult.success) {
-        console.log('[Azure Face] ✅ Face detected - Count:', azureFaceResult.faceCount);
-        console.log('[Azure Face] Detection model:', azureFaceResult.detectionModel);
+        console.log('[Image Search] OCR found text:', ocrText.substring(0, 200));
       } else {
-        console.log('[Azure Face] ⚠️ Face detection failed:', azureFaceResult.message);
+        console.log('[Image Search] No text found in OCR');
       }
       
-      // Use Google Vision API for face detection (fallback to Clarifai if fails)
-      let visionResult = await googleVisionService.detectFaces(imagePath);
+      // Step 4: Face Detection
+      console.log('[Image Search] Step 4: Face Detection...');
+      const azureFaceResult = await azureFaceService.detectFace(imagePath);
+      console.log('[Image Search] Azure Face:', azureFaceResult.success ? `${azureFaceResult.faceCount} faces` : 'Failed');
       
-      if (!visionResult) {
-        console.log('[Image Search] Google Vision failed, trying Clarifai...');
-        visionResult = await clarifaiService.detectFaces(imagePath);
-      }
-
-      console.log('[Image Search] Faces detected:', visionResult?.faceCount || 0);
-      
-      // Face++ detection
-      console.log('[Face++] Detecting face in uploaded image...');
       const facePPResult = await facePlusPlusService.detectFace(imagePath);
-      console.log('[Face++] Detection result:', facePPResult.success ? 'Success' : 'Failed');
+      console.log('[Image Search] Face++:', facePPResult.success ? 'Success' : 'Failed');
       
-      // Get social media profiles from reverse image search
-      let profiles = await googleVisionService.reverseImageSearch(imagePath);
+      // Step 5: Extract Username/Name from all sources
+      console.log('[Image Search] Step 5: Extracting Username/Name...');
+      let extractedUsername = usernameHint || extractedFromReverse.username;
+      let extractedName = extractedFromReverse.name;
       
-      if (profiles.length === 0) {
-        console.log('[Image Search] Google reverse search failed, trying Clarifai...');
-        const clarifaiProfiles = await clarifaiService.reverseImageSearch(imagePath);
-        profiles = [...profiles, ...clarifaiProfiles];
-      }
-      
-      // Try to extract username/name from AI analysis with better patterns
-      let extractedUsername = null;
-      let extractedName = null;
-      
-      // First try OCR text
-      if (ocrText) {
+      // From OCR text
+      if (!extractedUsername && ocrText) {
         const ocrUsernames = ocrService.extractUsernames(ocrText);
         const ocrNames = ocrService.extractNames(ocrText);
         
@@ -312,7 +397,8 @@ class AggregatorService {
         }
       }
       
-      if (aiAnalysis && aiAnalysis.success) {
+      // From AI analysis
+      if (!extractedUsername && aiAnalysis && aiAnalysis.success) {
         const analysisText = aiAnalysis.analysis;
         
         // Look for NAME: or USERNAME: in response
@@ -336,6 +422,10 @@ class AggregatorService {
           if (text.length < 30 && !text.includes(' ')) {
             extractedUsername = text.replace('@', '');
             console.log('[Image Search] Extracted username from text:', extractedUsername);
+          } else if (text.length < 50) {
+            // Might be a name
+            extractedName = text;
+            console.log('[Image Search] Extracted name from text:', extractedName);
           }
         }
         
@@ -359,83 +449,58 @@ class AggregatorService {
         }
       }
       
-      // If username hint provided, use it directly
-      if (usernameHint) {
-        extractedUsername = usernameHint;
-        console.log('[Image Search] Using provided username hint:', usernameHint);
-      }
+      console.log('[Image Search] ========== EXTRACTION RESULTS ==========');
+      console.log('[Image Search] Extracted Username:', extractedUsername || 'None');
+      console.log('[Image Search] Extracted Name:', extractedName || 'None');
       
+      let profiles = [];
       let additionalDataSources = null;
       let advancedInvestigation = null;
       let aiBiodata = null;
 
-      // If username found, search social media platforms
+      // Step 6: Search social media if username found
       if (extractedUsername) {
-        console.log('[Image Search] Searching social media for:', extractedUsername);
+        console.log('[Image Search] Step 6: Searching social media for:', extractedUsername);
         const socialResults = await this.searchAllPlatforms(extractedUsername);
         if (socialResults && socialResults.profiles) {
-          profiles = [...profiles, ...socialResults.profiles];
-          console.log('[Image Search] Added', socialResults.profiles.length, 'social media profiles');
+          profiles = socialResults.profiles;
           additionalDataSources = socialResults.additionalDataSources;
           advancedInvestigation = socialResults.advancedInvestigation;
           aiBiodata = socialResults.aiBiodata;
+          console.log('[Image Search] Found', profiles.length, 'social media profiles');
         }
-        
-        // Also search Google for more results
-        console.log('[Image Search] Searching Google for:', extractedUsername);
-        const googleResults = await freeGoogleScraper.searchPerson(extractedUsername);
-        if (googleResults.length > 0) {
-          const existingUrls = new Set(profiles.map(p => p.profileUrl));
-          googleResults.forEach(result => {
-            if (!existingUrls.has(result.link)) {
-              existingUrls.add(result.link);
-              const u = freeGoogleScraper.extractUsername(result.link) || extractedUsername;
-              profiles.push({
-                platform: result.platform,
-                username: u,
-                fullName: result.title,
-                profileUrl: result.link,
-                bio: result.snippet,
-                message: 'Found via Google Scraper'
-              });
-            }
-          });
-          console.log('[Image Search] Added', googleResults.length, 'Google results');
+      } else if (extractedName) {
+        console.log('[Image Search] Step 6: Searching with name:', extractedName);
+        const socialResults = await this.searchAllPlatforms(extractedName);
+        if (socialResults && socialResults.profiles) {
+          profiles = socialResults.profiles;
+          additionalDataSources = socialResults.additionalDataSources;
+          advancedInvestigation = socialResults.advancedInvestigation;
+          aiBiodata = socialResults.aiBiodata;
+          console.log('[Image Search] Found', profiles.length, 'profiles');
         }
-        
-        // Azure Face matching disabled (requires approval)
-        // Face++ matching (primary method)
-        if (facePPResult.success && profiles.length > 0) {
-          console.log('[Face++] Starting face matching with profiles...');
-          try {
-            const faceMatches = await facePlusPlusService.matchWithProfiles(imagePath, profiles);
-            if (faceMatches.success && faceMatches.matches.length > 0) {
-              console.log('[Face++] Found', faceMatches.totalMatches, 'face matches');
-              profiles = faceMatches.matches;
-            } else {
-              console.log('[Face++] No face matches, keeping all profiles');
-            }
-          } catch (e) {
-            console.error('[Face++] Matching error:', e.message);
-            console.log('[Face++] Keeping profiles without face matching');
-          }
-        }
+      } else {
+        console.log('[Image Search] No username/name found - cannot search social media');
       }
       
+      console.log('[Image Search] ========== FINAL RESULTS ==========');
       console.log('[Image Search] Total profiles found:', profiles.length);
+      console.log('[Image Search] ========== SEARCH COMPLETE ==========');
       
-      const faceCount = azureFaceResult.faceCount || visionResult?.faceCount || (facePPResult.success && facePPResult.faces?.length) || 0;
-      const faceDetected = azureFaceResult.success || (visionResult?.faceCount || 0) > 0 || (facePPResult.success && (facePPResult.faces?.length || 0) > 0);
-      const faceSource = azureFaceResult.success ? 'Azure Face API' : visionResult?.faceCount ? 'Google Vision/Clarifai' : facePPResult.success ? 'Face++' : 'None';
+      const faceCount = azureFaceResult.faceCount || (facePPResult.success && facePPResult.faces?.length) || 0;
+      const faceDetected = azureFaceResult.success || facePPResult.success;
+      const faceSource = azureFaceResult.success ? 'Azure Face API' : facePPResult.success ? 'Face++' : 'None';
+      
       return {
         message: `Face detection: ${faceSource} - ${faceCount} face(s) found`,
-        username: extractedUsername || usernameHint || null,
+        username: extractedUsername || extractedName || null,
         imagePath: imagePath,
         faceDetected,
         faceCount,
         azureFace: azureFaceResult,
         facePlusPlus: facePPResult,
         aiAnalysis: aiAnalysis,
+        reverseImageResults: reverseImageResults,
         extractedUsername: extractedUsername,
         extractedName: extractedName,
         profiles: profiles,

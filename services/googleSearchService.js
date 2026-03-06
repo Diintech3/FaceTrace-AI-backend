@@ -1,22 +1,152 @@
 const axios = require('axios');
 
 class GoogleSearchService {
+  constructor() {
+    this.serpApiKey = process.env.Google_SERCH_API;
+    this.googleApiKey = process.env.GOOGLE_SEARCH_API_KEY;
+    this.cx = process.env.GOOGLE_SEARCH_ENGINE_ID;
+  }
+
   async searchByName(name) {
+    // Try SerpAPI first (better results)
+    if (this.serpApiKey) {
+      const serpResult = await this.searchWithSerpAPI(name);
+      if (serpResult && serpResult.results.length > 0) {
+        return serpResult;
+      }
+    }
+
+    // Fallback to Google Custom Search
+    return this.searchWithGoogleAPI(name);
+  }
+
+  async searchWithSerpAPI(name) {
     try {
-      const apiKey = process.env.GOOGLE_SEARCH_API_KEY;
-      const cx = process.env.GOOGLE_SEARCH_ENGINE_ID;
+      console.log('[SerpAPI] Searching for:', name);
+      const query = `${name} site:instagram.com OR site:facebook.com OR site:twitter.com OR site:linkedin.com`;
 
+      const response = await axios.get('https://serpapi.com/search', {
+        params: {
+          q: query,
+          api_key: this.serpApiKey,
+          num: 10,
+          engine: 'google'
+        },
+        timeout: 15000
+      });
+
+      const results = response.data.organic_results?.map(item => ({
+        title: item.title,
+        link: item.link,
+        snippet: item.snippet,
+        platform: this.detectPlatform(item.link)
+      })) || [];
+
+      console.log('[SerpAPI] Found', results.length, 'results');
+      return {
+        query: name,
+        totalResults: response.data.search_information?.total_results,
+        results: results,
+        source: 'SerpAPI'
+      };
+    } catch (error) {
+      console.error('[SerpAPI] Error:', error.message);
+      return null;
+    }
+  }
+
+  async imageSearch(query, options = {}) {
+    try {
+      if (!this.serpApiKey) {
+        return { error: 'SerpAPI key not configured', results: [] };
+      }
+
+      console.log('[SerpAPI Images] Searching for:', query);
+
+      const response = await axios.get('https://serpapi.com/search', {
+        params: {
+          q: query,
+          api_key: this.serpApiKey,
+          tbm: 'isch',
+          num: options.num || 20,
+          engine: 'google'
+        },
+        timeout: 15000
+      });
+
+      const results = response.data.images_results?.map(item => ({
+        title: item.title,
+        link: item.link,
+        thumbnail: item.thumbnail,
+        source: item.source,
+        original: item.original
+      })) || [];
+
+      console.log('[SerpAPI Images] Found', results.length, 'images');
+      return {
+        query,
+        results,
+        source: 'SerpAPI Images'
+      };
+    } catch (error) {
+      console.error('[SerpAPI Images] Error:', error.message);
+      return { error: error.message, results: [] };
+    }
+  }
+
+  async newsSearch(query, options = {}) {
+    try {
+      if (!this.serpApiKey) {
+        return { error: 'SerpAPI key not configured', results: [] };
+      }
+
+      console.log('[SerpAPI News] Searching for:', query);
+
+      const response = await axios.get('https://serpapi.com/search', {
+        params: {
+          q: query,
+          api_key: this.serpApiKey,
+          tbm: 'nws',
+          num: options.num || 10,
+          engine: 'google'
+        },
+        timeout: 15000
+      });
+
+      const results = response.data.news_results?.map(item => ({
+        title: item.title,
+        link: item.link,
+        snippet: item.snippet,
+        source: item.source,
+        date: item.date,
+        thumbnail: item.thumbnail
+      })) || [];
+
+      console.log('[SerpAPI News] Found', results.length, 'news articles');
+      return {
+        query,
+        results,
+        source: 'SerpAPI News'
+      };
+    } catch (error) {
+      console.error('[SerpAPI News] Error:', error.message);
+      return { error: error.message, results: [] };
+    }
+  }
+
+  async searchWithGoogleAPI(name) {
+    try {
       console.log('[Google] Searching for:', name);
-      console.log('[Google] API Key present:', !!apiKey);
-      console.log('[Google] Search Engine ID:', cx);
+      console.log('[Google] API Key present:', !!this.googleApiKey);
+      console.log('[Google] Search Engine ID:', this.cx);
 
-      if (!apiKey || !cx) {
+      if (!this.googleApiKey || !this.cx) {
         console.log('[Google] API not configured');
         return { error: 'Google Search API not configured', results: [] };
       }
 
       const query = `${name} site:instagram.com OR site:facebook.com OR site:twitter.com OR site:linkedin.com`;
-      const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}&num=5`;
+      const url = `https://www.googleapis.com/customsearch/v1?key=${this.googleApiKey}&cx=${this.cx}&q=${encodeURIComponent(query)}&num=5`;
 
       console.log('[Google] Making search request...');
       const response = await axios.get(url);
@@ -33,7 +163,8 @@ class GoogleSearchService {
       return {
         query: name,
         totalResults: response.data.searchInformation?.totalResults,
-        results: results
+        results: results,
+        source: 'Google Custom Search'
       };
     } catch (error) {
       console.error('[Google] Search error:', error.message);

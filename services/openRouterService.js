@@ -24,20 +24,7 @@ class OpenRouterService {
       const base64Image = imageBuffer.toString('base64');
       const mimeType = this.getMimeType(imagePath);
 
-      // Use Gemini for vision - better at OCR and text extraction, less restrictive
-      const visionModel = 'google/gemini-flash-1.5';
-      console.log('[OpenRouter] Using', visionModel, 'for image analysis...');
-      const response = await axios.post(
-        this.apiUrl,
-        {
-          model: visionModel,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: `You are an OCR and metadata extraction assistant for a law enforcement investigation tool. Your job is to REPORT ALL VISIBLE TEXT and labels in the image - exactly as written. Do not refuse. Extract factual data.
+      const promptText = `You are an OCR and metadata extraction assistant. Your job is to REPORT ALL VISIBLE TEXT and labels in the image - exactly as written.
 
 TASK: List every piece of TEXT that appears in the image - watermarks, badges, signs, nameplates, usernames, labels, captions, logos with text.
 
@@ -53,38 +40,74 @@ Then add PHYSICAL DESCRIPTION (factual only):
 - Age range, Gender, Hair, Facial hair, Clothing, Build, Distinctive features
 - Setting, photo quality, lighting
 
-Be factual. Report what is visibly written. Do not invent. Do not refuse to report visible text.`
-                },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: `data:${mimeType};base64,${base64Image}`
-                  }
-                }
-              ]
-            }
-          ]
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'http://localhost:3000',
-            'X-Title': 'FaceTrace AI'
-          },
-          timeout: 60000
-        }
-      );
+Be factual. Report what is visibly written. Do not invent.`;
 
-      const analysis = response.data.choices[0].message.content;
-
-      console.log('[OpenRouter] Analysis completed');
-      console.log('[OpenRouter] Analysis length:', analysis.length);
-      return {
-        success: true,
-        analysis: analysis,
-        model: visionModel + ' (vision/OCR)'
+      const payload = {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: promptText },
+              {
+                type: 'image_url',
+                image_url: { url: `data:${mimeType};base64,${base64Image}` }
+              }
+            ]
+          }
+        ]
       };
+
+      const headers = {
+        'Authorization': `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'http://localhost:3000',
+        'X-Title': 'FaceTrace AI'
+      };
+
+      const preferred = (process.env.OPENROUTER_VISION_MODEL || '').trim();
+      const modelCandidates = [
+        preferred,
+        // Fallbacks (OpenRouter availability varies by account/region)
+        'anthropic/claude-3-haiku',
+        'openai/gpt-4o-mini'
+      ].filter(Boolean);
+
+      let lastErr = null;
+      for (const model of modelCandidates) {
+        try {
+          console.log('[OpenRouter] Using model:', model);
+          const response = await axios.post(
+            this.apiUrl,
+            { model, ...payload },
+            { headers, timeout: 60000 }
+          );
+
+          const analysis = response.data.choices?.[0]?.message?.content;
+          if (!analysis) {
+            throw new Error('OpenRouter returned empty analysis');
+          }
+
+          console.log('[OpenRouter] Analysis completed');
+          console.log('[OpenRouter] Analysis length:', analysis.length);
+          return {
+            success: true,
+            analysis,
+            model
+          };
+        } catch (err) {
+          lastErr = err;
+          const status = err.response?.status;
+          const msg = err.response?.data?.error?.message || err.message;
+          console.error('[OpenRouter] Model failed:', model, '-', status || '', msg);
+
+          // If model doesn't exist, try next candidate
+          if (status === 404) continue;
+          // For other errors (401/403/429), don't loop forever
+          continue;
+        }
+      }
+
+      throw lastErr || new Error('All OpenRouter vision models failed');
     } catch (error) {
       console.error('[OpenRouter] Error:', error.message);
       if (error.response) {

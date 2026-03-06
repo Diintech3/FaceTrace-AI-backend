@@ -1,20 +1,18 @@
-# Environment variables - NEVER COMMIT
+# Environment variables
 .env
 .env.local
 .env.production
-.env.development
 
 # Dependencies
 node_modules/
 
-# Uploads & User Data
+# Uploads
 uploads/*
 !uploads/.gitkeep
 
 # Logs
 *.log
 npm-debug.log*
-yarn-debug.log*
 
 # OS files
 .DS_Store
@@ -23,11 +21,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
-*.swp
 
-# Database
-*.db
-*.sqlite
-
-# Testing
-coverage/
+# Build
+dist/
+build/

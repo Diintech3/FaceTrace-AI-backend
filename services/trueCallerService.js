@@ -9,23 +9,43 @@ class TrueCallerService {
 
   async searchByPhone(phoneNumber) {
     if (!this.apiKey && !this.rapidApiKey) {
+      console.log('[TrueCaller] No API key configured, skipping');
       return { found: false, message: 'TrueCaller API key not configured' };
     }
 
     try {
       console.log('[TrueCaller] Searching phone:', phoneNumber);
+      console.log('[TrueCaller] Using API key:', this.rapidApiKey ? 'RapidAPI' : 'Direct');
+      
+      // Clean phone number
+      const cleanPhone = phoneNumber.replace(/[^\d+]/g, '');
       
       const response = await axios.get(`${this.baseUrl}/api/v1/getDetails`, {
-        params: { phone: phoneNumber, countryCode: 'IN' },
+        params: { 
+          phone: cleanPhone, 
+          countryCode: 'IN' 
+        },
         headers: {
           'X-RapidAPI-Key': this.rapidApiKey || this.apiKey,
           'X-RapidAPI-Host': 'truecaller4.p.rapidapi.com'
         },
-        timeout: 15000
+        timeout: 15000,
+        validateStatus: (status) => status < 500
       });
+
+      console.log('[TrueCaller] Response status:', response.status);
+
+      if (response.status === 404) {
+        return { found: false, message: 'Phone number not found in TrueCaller' };
+      }
+
+      if (response.status === 403) {
+        return { found: false, message: 'TrueCaller API access denied - check subscription' };
+      }
 
       if (response.data && response.data.data) {
         const result = response.data.data;
+        console.log('[TrueCaller] ✅ Found data for:', phoneNumber);
         return {
           found: true,
           name: result.name,
@@ -40,7 +60,7 @@ class TrueCallerService {
 
       return { found: false, message: 'No data found' };
     } catch (error) {
-      console.error('[TrueCaller] Error:', error.message);
+      console.error('[TrueCaller] Error:', error.response?.status, error.message);
       return { found: false, error: error.message };
     }
   }

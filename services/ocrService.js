@@ -5,32 +5,56 @@ class OCRService {
     try {
       console.log('[OCR] Extracting text from image:', imagePath);
       
-      const { data: { text } } = await Tesseract.recognize(
-        imagePath,
-        'eng',
-        {
-          logger: m => {} // Silent
-        }
-      );
+      // Try multiple configurations for better accuracy
+      const configs = [
+        { lang: 'eng', psm: 3 },  // Fully automatic page segmentation
+        { lang: 'eng', psm: 6 },  // Assume a single uniform block of text
+        { lang: 'eng', psm: 11 }, // Sparse text
+      ];
 
-      const cleanText = text.trim();
+      let bestResult = { text: '', confidence: 0 };
+
+      for (const config of configs) {
+        try {
+          const { data } = await Tesseract.recognize(
+            imagePath,
+            config.lang,
+            {
+              logger: m => {},
+              tessedit_pageseg_mode: config.psm,
+              tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@._-',
+            }
+          );
+
+          if (data.text.trim().length > bestResult.text.length) {
+            bestResult = { text: data.text.trim(), confidence: data.confidence };
+          }
+        } catch (e) {
+          console.log(`[OCR] Config ${config.psm} failed:`, e.message);
+        }
+      }
+
+      const cleanText = bestResult.text;
       console.log('[OCR] Extracted text length:', cleanText.length);
+      console.log('[OCR] Confidence:', bestResult.confidence);
       
       if (cleanText.length > 0) {
-        console.log('[OCR] Text found:', cleanText.substring(0, 100));
+        console.log('[OCR] Text found:', cleanText.substring(0, 200));
       }
 
       return {
         success: true,
         text: cleanText,
-        hasText: cleanText.length > 0
+        hasText: cleanText.length > 0,
+        confidence: bestResult.confidence
       };
     } catch (error) {
       console.error('[OCR] Error:', error.message);
       return {
         success: false,
         text: '',
-        hasText: false
+        hasText: false,
+        confidence: 0
       };
     }
   }
