@@ -466,9 +466,49 @@ class AggregatorService {
       let advancedInvestigation = null;
       let aiBiodata = null;
 
-      // Step 6: Search social media if username found
+      // Step 6: Face Recognition using jimp image similarity
+      console.log('[Image Search] Step 6: Face Recognition Search...');
+      try {
+        const faceRecognitionService = require('./faceRecognitionService');
+        const socialMediaFaceScraper = require('./socialMediaFaceScraper');
+        
+        // Get potential profiles to compare
+        const searchQuery = extractedUsername || extractedName || 'person';
+        const potentialProfiles = await socialMediaFaceScraper.searchPotentialUsernames(searchQuery);
+        
+        if (potentialProfiles.length > 0) {
+          console.log('[Image Search] Found', potentialProfiles.length, 'potential profiles to compare');
+          
+          // Get face rectangle from Azure if available
+          const faceRect = azureFaceResult.success && azureFaceResult.faces?.[0]?.faceRectangle;
+          
+          const faceMatches = await faceRecognitionService.searchSimilarFaces(
+            imagePath,
+            potentialProfiles,
+            faceRect
+          );
+          
+          if (faceMatches && faceMatches.length > 0) {
+            similarFaces = faceMatches.map(match => ({
+              thumbnail: match.profilePicture,
+              url: match.profileUrl || match.url,
+              source: match.platform,
+              link: match.profileUrl || match.url,
+              similarity: match.similarity,
+              username: match.username
+            }));
+            console.log('[Image Search] Found', faceMatches.length, 'face matches');
+          }
+        } else {
+          console.log('[Image Search] No potential profiles found for comparison');
+        }
+      } catch (faceError) {
+        console.error('[Image Search] Face recognition error:', faceError.message);
+      }
+      
+      // Step 7: Search social media if username found
       if (extractedUsername) {
-        console.log('[Image Search] Step 6: Searching social media for:', extractedUsername);
+        console.log('[Image Search] Step 7: Searching social media for:', extractedUsername);
         const socialResults = await this.searchAllPlatforms(extractedUsername);
         if (socialResults && socialResults.profiles) {
           profiles = socialResults.profiles;
@@ -478,7 +518,7 @@ class AggregatorService {
           console.log('[Image Search] Found', profiles.length, 'social media profiles');
         }
       } else if (extractedName) {
-        console.log('[Image Search] Step 6: Searching with name:', extractedName);
+        console.log('[Image Search] Step 7: Searching with name:', extractedName);
         const socialResults = await this.searchAllPlatforms(extractedName);
         if (socialResults && socialResults.profiles) {
           profiles = socialResults.profiles;

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const searchController = require('../controllers/searchController');
+const websiteController = require('../controllers/websiteController');
 
 // Configure multer for image uploads
 const storage = multer.diskStorage({
@@ -23,5 +24,6 @@ router.post('/search/images', searchController.imageSearch);
 router.post('/search/news', searchController.newsSearch);
 router.post('/search/phone', searchController.validatePhone);
 router.post('/search/ip', searchController.lookupIP);
+router.post('/search/website', websiteController.analyzeWebsite);
 
 module.exports = router;

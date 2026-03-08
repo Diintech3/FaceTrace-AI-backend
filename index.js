@@ -13,6 +13,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve static files (screenshots)
+app.use('/screenshots', express.static('uploads/screenshots'));
+
 // Request logging
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
