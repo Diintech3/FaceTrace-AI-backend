@@ -7,8 +7,11 @@ const dns = require('dns').promises;
 
 class WebsiteIntelligenceService {
   constructor() {
-    this.apiKey = process.env.OPENROUTER_API_KEY;
-    this.apiUrl = 'https://openrouter.ai/api/v1/chat/completions';
+    this.openRouterKey = process.env.OPENROUTER_API_KEY;
+    this.groqKey = process.env.GROQ_API_KEY;
+    this.apiUrl = this.groqKey 
+      ? 'https://api.groq.com/openai/v1/chat/completions'
+      : 'https://openrouter.ai/api/v1/chat/completions';
     this.browser = null;
   }
   
@@ -761,6 +764,21 @@ class WebsiteIntelligenceService {
   
   async analyzeWithAI(pageInfo, links, contactInfo, socialMedia, technologies, screenshots, domainInfo, serverInfo) {
     try {
+      // Check if any API key exists
+      const apiKey = this.groqKey || this.openRouterKey;
+      const usingGroq = !!this.groqKey;
+      
+      if (!apiKey || apiKey === 'undefined') {
+        console.log('[AI] ⚠️ No API key configured, using fallback analysis');
+        return {
+          success: false,
+          error: 'AI API key not configured',
+          fallbackAnalysis: this.generateFallbackAnalysis(pageInfo, contactInfo, socialMedia, technologies, domainInfo)
+        };
+      }
+      
+      console.log(`[AI] 🤖 Using ${usingGroq ? 'Groq (Free & Fast)' : 'OpenRouter'}`);
+      
       const screenshotAnalysis = screenshots
         .filter(s => s.visibleContent && s.visibleContent.length > 0)
         .slice(0, 20)
@@ -904,17 +922,19 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, no explanations 
       const response = await axios.post(
         this.apiUrl,
         {
-          model: 'anthropic/claude-3-haiku',
+          model: usingGroq ? 'llama-3.3-70b-versatile' : 'anthropic/claude-3-haiku',
           messages: [{ role: 'user', content: prompt }],
           temperature: 0.2,
           max_tokens: 4096
         },
         {
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
+            'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'http://localhost:3000',
-            'X-Title': 'FaceTrace AI'
+            ...(usingGroq ? {} : {
+              'HTTP-Referer': 'http://localhost:3000',
+              'X-Title': 'FaceTrace AI'
+            })
           },
           timeout: 60000
         }
@@ -936,15 +956,86 @@ IMPORTANT: Return ONLY valid JSON. No markdown, no code blocks, no explanations 
       return {
         success: true,
         analysis: cleanedAnalysis,
-        model: 'claude-3-haiku'
+        model: usingGroq ? 'llama-3.3-70b (Groq)' : 'claude-3-haiku'
       };
     } catch (error) {
       console.error('[AI] ❌ Error:', error.message);
+      
+      // Check for specific error codes
+      if (error.response?.status === 402) {
+        console.error('[AI] 💳 Payment Required - API credits exhausted');
+        return {
+          success: false,
+          error: 'AI API credits exhausted (402 Payment Required)',
+          fallbackAnalysis: this.generateFallbackAnalysis(pageInfo, contactInfo, socialMedia, technologies, domainInfo)
+        };
+      }
+      
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        fallbackAnalysis: this.generateFallbackAnalysis(pageInfo, contactInfo, socialMedia, technologies, domainInfo)
       };
     }
+  }
+  
+  generateFallbackAnalysis(pageInfo, contactInfo, socialMedia, technologies, domainInfo) {
+    // Generate basic analysis without AI
+    const hasContact = contactInfo.emails.length > 0 || contactInfo.phones.length > 0;
+    const hasSocial = Object.values(socialMedia).some(v => v);
+    const trustScore = (hasContact ? 3 : 0) + (hasSocial ? 2 : 0) + (domainInfo.registrar !== 'Unknown' ? 3 : 0) + (technologies.length > 0 ? 2 : 0);
+    
+    return JSON.stringify({
+      executiveSummary: `${pageInfo.title} is a website with ${pageInfo.links} links and ${pageInfo.images} images. ${hasContact ? 'Contact information is available.' : 'Limited contact information.'} ${technologies.length > 0 ? `Uses ${technologies.length} technologies.` : ''}`,
+      websiteDetails: {
+        purpose: pageInfo.description || 'Website purpose not clearly defined in meta description',
+        businessType: technologies.includes('Shopify') || technologies.includes('WooCommerce') ? 'E-commerce' : 'Informational/Service Website',
+        industry: 'Not determined',
+        targetAudience: 'General audience',
+        mainServices: pageInfo.headings.h2.slice(0, 3)
+      },
+      keyFeatures: [
+        `${pageInfo.links} internal and external links`,
+        `${pageInfo.images} images throughout the site`,
+        `${pageInfo.forms} forms for user interaction`,
+        hasContact ? 'Contact information provided' : 'Limited contact options'
+      ],
+      contentAnalysis: {
+        quality: pageInfo.fullText.length > 5000 ? 'High' : pageInfo.fullText.length > 2000 ? 'Medium' : 'Low',
+        professionalism: technologies.length > 3 ? 'Professional' : 'Basic',
+        completeness: hasContact && hasSocial ? 'Complete' : 'Partial',
+        userExperience: technologies.includes('Bootstrap') || technologies.includes('Tailwind CSS') ? 'Modern' : 'Standard'
+      },
+      trustAndCredibility: {
+        trustScore: `${trustScore}/10`,
+        contactability: hasContact ? 'Good - Multiple contact methods available' : 'Limited - Few contact options',
+        positiveSignals: [
+          hasContact && 'Contact information provided',
+          hasSocial && 'Social media presence',
+          domainInfo.registrar !== 'Unknown' && `Registered with ${domainInfo.registrar}`,
+          technologies.length > 0 && 'Modern technologies detected'
+        ].filter(Boolean),
+        negativeSignals: [
+          !hasContact && 'No contact information',
+          !hasSocial && 'No social media links',
+          technologies.length === 0 && 'No modern frameworks detected'
+        ].filter(Boolean)
+      },
+      technicalAssessment: {
+        technologyStack: technologies.length > 0 ? technologies.join(', ') : 'Basic HTML/CSS',
+        modernization: technologies.length > 3 ? 'Modern' : technologies.length > 0 ? 'Moderate' : 'Basic',
+        performance: 'Not measured',
+        seoOptimization: pageInfo.description ? 'Basic SEO present' : 'Limited SEO'
+      },
+      recommendations: [
+        !hasContact && 'Add clear contact information',
+        !hasSocial && 'Add social media links',
+        pageInfo.description === '' && 'Add meta description for better SEO',
+        'Consider adding more interactive elements'
+      ].filter(Boolean),
+      overallAssessment: `${pageInfo.title} is a ${technologies.length > 0 ? 'modern' : 'basic'} website with ${hasContact ? 'good' : 'limited'} contactability. Trust score: ${trustScore}/10. ${hasSocial ? 'Has social media presence.' : 'Could benefit from social media integration.'} ${domainInfo.registrar !== 'Unknown' ? `Domain registered with ${domainInfo.registrar}.` : ''}`,
+      note: 'This is a basic automated analysis. AI-powered deep analysis is currently unavailable.'
+    }, null, 2);
   }
 }
 
