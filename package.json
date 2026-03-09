@@ -14,6 +14,7 @@
     "axios": "^1.13.6",
     "cheerio": "^1.2.0",
     "cors": "^2.8.5",
+    "dns-lookup": "^0.1.0",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
     "jimp": "^1.6.0",
@@ -23,7 +24,8 @@
     "puppeteer": "^24.38.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "whois-json": "^2.0.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
