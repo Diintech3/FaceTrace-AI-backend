@@ -1,5 +1,8 @@
 const websiteIntelligenceService = require('../services/websiteIntelligenceService');
 
+// Track active analyses to prevent duplicates
+const activeAnalyses = new Map();
+
 exports.analyzeWebsite = async (req, res) => {
   try {
     const { url } = req.body;
@@ -21,13 +24,27 @@ exports.analyzeWebsite = async (req, res) => {
       });
     }
     
+    // Check if analysis already in progress
+    if (activeAnalyses.has(url)) {
+      return res.status(429).json({
+        success: false,
+        message: 'Analysis already in progress for this URL'
+      });
+    }
+    
     console.log('[Controller] Website analysis started for:', url);
     
-    const result = await websiteIntelligenceService.analyzeWebsite(url);
+    // Mark as active
+    activeAnalyses.set(url, Date.now());
     
-    console.log('[Controller] Website analysis completed');
-    
-    res.json(result);
+    try {
+      const result = await websiteIntelligenceService.analyzeWebsite(url);
+      console.log('[Controller] Website analysis completed');
+      res.json(result);
+    } finally {
+      // Always remove from active analyses
+      activeAnalyses.delete(url);
+    }
     
   } catch (error) {
     console.error('[Controller] Website analysis error:', error);

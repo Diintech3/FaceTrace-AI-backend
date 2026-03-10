@@ -4,6 +4,9 @@ const path = require('path');
 const axios = require('axios');
 const whois = require('whois-json');
 const dns = require('dns').promises;
+const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
 
 class WebsiteIntelligenceService {
   constructor() {
@@ -16,57 +19,63 @@ class WebsiteIntelligenceService {
   }
   
   async getBrowser() {
-    // First try to connect to manually launched Chrome (port 9222)
-    if (!this.browser || !this.browser.isConnected()) {
-      try {
-        console.log('[Browser] 🔍 Connecting to your Chrome (port 9222)...');
-        this.browser = await puppeteer.connect({ 
-          browserURL: 'http://localhost:9222',
-          defaultViewport: null 
-        });
-        console.log('[Browser] ✅ Connected to YOUR Chrome browser!');
-        console.log('[Browser] 📌 New tabs will open in YOUR current browser');
-        return this.browser;
-      } catch (e) {
-        console.log('[Browser] ⚠️ Could not connect to Chrome on port 9222');
-        console.log('[Browser] 💡 To use YOUR browser: Run START_CHROME.bat first');
-      }
-    }
-    
-    // Fallback: Check if we already have a browser
-    if (this.browser && this.browser.isConnected()) {
-      const pages = await this.browser.pages();
-      console.log(`[Browser] ♻️ Reusing browser (${pages.length} tabs open)`);
-      return this.browser;
-    }
-    
-    // Last resort: Launch new browser
+    // Always launch a fresh browser for each analysis
     console.log('[Browser] 🚀 Launching new browser...');
     this.browser = await puppeteer.launch({
       headless: false,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--start-maximized'],
-      defaultViewport: null
+      args: [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox', 
+        '--start-maximized',
+        '--window-position=0,0',
+        '--disable-infobars',
+        '--force-device-scale-factor=1'
+      ],
+      defaultViewport: null,
+      ignoreDefaultArgs: ['--enable-automation']
     });
     
-    console.log('[Browser] ✅ Browser ready! Will reuse for all websites.');
+    // Get all pages and bring first one to front
+    const pages = await this.browser.pages();
+    if (pages.length > 0) {
+      const page = pages[0];
+      await page.bringToFront();
+      // Force focus by evaluating window.focus()
+      await page.evaluate(() => {
+        window.focus();
+      });
+    }
+    
+    // Windows-specific: Force window to foreground using PowerShell
+    if (process.platform === 'win32') {
+      try {
+        await execPromise('powershell -Command "Add-Type @\"\nusing System;\nusing System.Runtime.InteropServices;\npublic class Win {\n[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd);\n[DllImport(\"user32.dll\")] public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);\n}\n\"@; $hwnd = [Win]::FindWindow(\"Chrome_WidgetWin_1\", $null); [Win]::SetForegroundWindow($hwnd)"');
+      } catch (e) {
+        // Fallback: Simple tasklist approach
+        try {
+          await execPromise('powershell -Command "(New-Object -ComObject WScript.Shell).AppActivate((Get-Process chrome | Select-Object -First 1).MainWindowTitle)"');
+        } catch (e2) {
+          console.log('[Browser] ⚠️ Could not force window to foreground');
+        }
+      }
+    }
+    
+    console.log('[Browser] ✅ Browser ready!');
     return this.browser;
   }
 
   async analyzeWebsite(url) {
     let page = null;
     let shouldCloseBrowser = false;
+    let navResponse = null;
     
     try {
       console.log('\n[Analysis] 🎯 Starting deep analysis:', url);
       
       const browser = await this.getBrowser();
       
-      // Check if this is a new browser we launched
-      if (!this.browser.isConnected() || (await browser.pages()).length === 1) {
-        shouldCloseBrowser = true;
-      }
-      
       page = await browser.newPage();
+      await page.bringToFront();
       
       console.log('[Page] ➕ New tab created');
       
@@ -76,8 +85,8 @@ class WebsiteIntelligenceService {
       
       // Navigate
       console.log('[Page] 🌐 Loading website...');
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 }).catch(() => {});
-      await new Promise(resolve => setTimeout(resolve, 5000)); // Wait longer for page to settle
+      navResponse = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => null);
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Reduced wait time
       
       console.log('[Page] ✅ Website loaded');
       
@@ -109,7 +118,7 @@ class WebsiteIntelligenceService {
       
       // Get server information
       console.log('[Server] 🖥️ Detecting server info...');
-      const serverInfo = await this.getServerInfo(page);
+      const serverInfo = await this.getServerInfo(page, navResponse);
       console.log(`[Server] ✅ Server: ${serverInfo.server || 'Unknown'}`);
       
       // Visit internal pages
@@ -124,13 +133,11 @@ class WebsiteIntelligenceService {
       
       console.log('[Analysis] ✅ Complete!\n');
       
-      // Close browser after analysis
-      if (shouldCloseBrowser && this.browser) {
-        console.log('[Browser] 🔒 Closing browser...');
-        await this.browser.close();
-        this.browser = null;
-        console.log('[Browser] ✅ Browser closed');
-      }
+      // Always close browser after analysis
+      console.log('[Browser] 🔒 Closing browser...');
+      await this.browser.close();
+      this.browser = null;
+      console.log('[Browser] ✅ Browser closed');
       
       return {
         success: true,
@@ -153,8 +160,8 @@ class WebsiteIntelligenceService {
       console.error('[Analysis] ❌ Error:', error.message);
       if (page) await page.close().catch(() => {});
       
-      // Close browser on error too
-      if (shouldCloseBrowser && this.browser) {
+      // Always close browser on error
+      if (this.browser) {
         await this.browser.close().catch(() => {});
         this.browser = null;
       }
@@ -232,12 +239,12 @@ class WebsiteIntelligenceService {
     console.log('[Scroll] ✅ Complete');
     
     // Scroll to top and wait
-    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+    await new Promise(resolve => setTimeout(resolve, 1000));
     
     const pageHeight = await page.evaluate(() => document.body.scrollHeight);
     const viewportHeight = 768;
-    const steps = 20; // Reduced for better performance
+    const steps = 10; // Reduced screenshots for speed
     
     console.log(`[Screenshots] 📸 Capturing ${steps} screenshots...`);
     
@@ -250,8 +257,8 @@ class WebsiteIntelligenceService {
         window.scrollTo({ top: pos, behavior: 'smooth' });
       }, scrollPos);
       
-      // Wait longer for content to settle
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for content to settle
+      await new Promise(resolve => setTimeout(resolve, 500));
       
       const visibleContent = await page.evaluate(() => {
         const elements = document.querySelectorAll('h1, h2, h3, p, button, a');
@@ -296,7 +303,7 @@ class WebsiteIntelligenceService {
     try {
       console.log('[Screenshot] 📸 Capturing full page...');
       await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
       const fullFilename = `full_${Date.now()}.png`;
       const fullPath = path.join(dir, fullFilename);
@@ -321,61 +328,87 @@ class WebsiteIntelligenceService {
   async discoverPages(page, baseUrl) {
     return await page.evaluate((base) => {
       const baseHost = new URL(base).hostname;
-      const basePath = new URL(base).pathname;
       const links = Array.from(document.querySelectorAll('a[href]'));
       const discovered = new Set();
       
       links.forEach(a => {
         try {
           const url = new URL(a.href);
-          // Skip if same as base URL or just hash
+          // Only same domain, skip hash/javascript/files
           if (url.hostname === baseHost && 
               url.href !== base &&
-              url.pathname !== basePath &&
               !url.href.includes('#') && 
               !url.href.includes('javascript:') &&
-              !url.href.match(/\.(pdf|jpg|png|gif|zip|doc|xls|ppt)$/i)) {
-            discovered.add(url.href);
+              !url.href.match(/\.(pdf|jpg|png|gif|zip|doc|xls|ppt|jpeg|svg|ico)$/i)) {
+            // Normalize URL (remove trailing slash for comparison)
+            const normalized = url.href.replace(/\/$/, '');
+            discovered.add(normalized);
           }
         } catch (e) {}
       });
       
-      return Array.from(discovered).slice(0, 10);
+      return Array.from(discovered);
     }, baseUrl).catch(() => []);
   }
   
   async visitInternalPages(browser, pages) {
     const screenshots = [];
     const dir = path.join(__dirname, '../uploads/screenshots');
-    const maxPages = Math.min(pages.length, 8);
+    const visitedUrls = new Set(); // Track visited URLs
     
-    console.log(`[Internal] 🌐 Visiting ${maxPages} internal pages with full scroll capture...`);
+    if (pages.length === 0) {
+      console.log('[Internal] ⚠️ No internal pages to visit');
+      return screenshots;
+    }
     
-    for (let i = 0; i < maxPages; i++) {
+    console.log(`[Internal] 🌐 Found ${pages.length} internal pages to visit`);
+    
+    for (let i = 0; i < pages.length; i++) {
+      const pageUrl = pages[i];
+      
+      // Skip if already visited
+      if (visitedUrls.has(pageUrl)) {
+        console.log(`[Internal] ⏭️ Skipping duplicate: ${pageUrl}`);
+        continue;
+      }
+      
+      visitedUrls.add(pageUrl);
       let internalPage = null;
+      
       try {
-        console.log(`[Internal] ➡️ Page ${i + 1}/${maxPages}: ${pages[i]}`);
+        console.log(`[Internal] ➡️ Page ${i + 1}/${pages.length}: ${pageUrl}`);
         
         internalPage = await browser.newPage();
+        await internalPage.bringToFront();
         await internalPage.setViewport({ width: 1366, height: 768 });
         await internalPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
         
-        await internalPage.goto(pages[i], { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        const response = await internalPage.goto(pageUrl, { 
+          waitUntil: 'domcontentloaded', 
+          timeout: 30000 
+        }).catch(() => null);
+        
+        if (!response || !response.ok()) {
+          console.log(`[Internal] ⚠️ Page ${i + 1} failed to load`);
+          await internalPage.close();
+          continue;
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         const pageData = await internalPage.evaluate(() => ({
           title: document.title || 'Untitled',
           h1: document.querySelector('h1')?.textContent.trim() || ''
         })).catch(() => ({ title: 'Untitled', h1: '' }));
         
-        console.log(`[Internal] 📜 Auto-scrolling page ${i + 1}...`);
+        console.log(`[Internal] 📜 Scrolling page ${i + 1}: ${pageData.title}`);
         
-        // Auto-scroll this page
+        // Auto-scroll
         await internalPage.evaluate(async () => {
           await new Promise((resolve) => {
             let count = 0;
             const interval = setInterval(() => {
-              window.scrollBy({ top: 120, behavior: 'smooth' });
+              window.scrollBy({ top: 150, behavior: 'smooth' });
               count++;
               const scrollPos = window.scrollY + window.innerHeight;
               if (scrollPos >= document.body.scrollHeight - 50 || count > 50) {
@@ -386,74 +419,57 @@ class WebsiteIntelligenceService {
           });
         });
         
-        await internalPage.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await internalPage.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+        await new Promise(resolve => setTimeout(resolve, 1000));
         
         const pageHeight = await internalPage.evaluate(() => document.body.scrollHeight);
         const viewportHeight = 768;
-        const steps = 10; // 10 screenshots per internal page
+        const steps = Math.min(5, Math.ceil(pageHeight / viewportHeight)); // Reduced to 5 screenshots max
         
-        console.log(`[Internal] 📸 Capturing ${steps} screenshots from page ${i + 1}...`);
+        console.log(`[Internal] 📸 Capturing ${steps} screenshots from page ${i + 1}`);
         
         for (let j = 0; j < steps; j++) {
-          const percentage = j / (steps - 1);
+          const percentage = j / Math.max(steps - 1, 1);
           const scrollPos = Math.floor(percentage * Math.max(0, pageHeight - viewportHeight));
           
           await internalPage.evaluate((pos) => {
-            window.scrollTo({ top: pos, behavior: 'smooth' });
+            window.scrollTo({ top: pos, behavior: 'instant' });
           }, scrollPos);
           
-          await new Promise(resolve => setTimeout(resolve, 800));
+          await new Promise(resolve => setTimeout(resolve, 500));
           
-          const visibleContent = await internalPage.evaluate(() => {
-            const elements = document.querySelectorAll('h1, h2, h3, p');
-            const visible = [];
-            elements.forEach(el => {
-              const rect = el.getBoundingClientRect();
-              if (rect.top >= 0 && rect.top <= window.innerHeight) {
-                const text = el.textContent?.trim();
-                if (text && text.length > 5 && text.length < 150) visible.push(text);
-              }
-            });
-            return visible.slice(0, 5);
-          }).catch(() => []);
-          
-          const filename = `page_${i}_scroll_${j}_${Date.now()}.png`;
+          const filename = `internal_${i}_${j}_${Date.now()}.png`;
           const filepath = path.join(dir, filename);
           
           try {
-            await internalPage.screenshot({ path: filepath, fullPage: false });
+            await internalPage.screenshot({ path: filepath });
             
             screenshots.push({
               filename,
               path: filepath,
               url: `/screenshots/${filename}`,
-              pageUrl: pages[i],
+              pageUrl: pageUrl,
               pageTitle: pageData.title,
               position: `page_${i + 1}_scroll_${j + 1}`,
-              percentage: Math.round(percentage * 100),
-              description: `${pageData.title} - ${Math.round(percentage * 100)}%`,
-              visibleContent: [pageData.title, ...visibleContent].filter(t => t)
+              percentage: Math.round(percentage * 100)
             });
             
-            console.log(`[Internal] ✅ Page ${i + 1} - Screenshot ${j + 1}/${steps} (${Math.round(percentage * 100)}%)`);
+            console.log(`[Internal] ✅ Page ${i + 1} - Screenshot ${j + 1}/${steps}`);
           } catch (e) {
-            console.log(`[Internal] ⚠️ Page ${i + 1} - Screenshot ${j + 1} failed`);
+            console.log(`[Internal] ⚠️ Screenshot failed`);
           }
         }
         
-        console.log(`[Internal] ✅ Completed page ${i + 1}: ${pageData.title} (${steps} screenshots)`);
-        
+        console.log(`[Internal] ✅ Completed: ${pageData.title}`);
         await internalPage.close();
-        internalPage = null;
         
       } catch (e) {
-        console.log(`[Internal] ⚠️ Page ${i + 1} failed: ${e.message}`);
+        console.log(`[Internal] ❌ Error on page ${i + 1}: ${e.message}`);
         if (internalPage) await internalPage.close().catch(() => {});
       }
     }
     
-    console.log(`[Internal] 🎉 Total internal page screenshots: ${screenshots.length}`);
+    console.log(`[Internal] 🎉 Visited ${visitedUrls.size} unique pages, captured ${screenshots.length} screenshots`);
     return screenshots;
   }
   
@@ -727,7 +743,7 @@ class WebsiteIntelligenceService {
     }
   }
   
-  async getServerInfo(page) {
+  async getServerInfo(page, navResponse = null) {
     try {
       const serverInfo = await page.evaluate(() => {
         return {
@@ -739,9 +755,8 @@ class WebsiteIntelligenceService {
         };
       });
       
-      // Get HTTP headers via a request
-      const response = await page.goto(page.url(), { waitUntil: 'domcontentloaded' }).catch(() => null);
-      const headers = response ? response.headers() : {};
+      // Use initial navigation response headers (avoid re-navigation which can detach frames)
+      const headers = navResponse ? navResponse.headers() : {};
       
       return {
         server: headers['server'] || 'Unknown',

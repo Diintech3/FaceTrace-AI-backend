@@ -202,15 +202,8 @@ class SearchController {
       
       // Format response for frontend
       const results = {
-        ...comprehensiveData.validation,
-        ownerName: comprehensiveData.ownerInfo?.name || null,
-        ownerLocation: comprehensiveData.ownerInfo?.location || null,
-        spamScore: comprehensiveData.ownerInfo?.spamScore || 0,
-        verified: comprehensiveData.ownerInfo?.verified || false,
-        truecallerFound: comprehensiveData.ownerInfo?.found || false,
-        socialMedia: comprehensiveData.socialMedia || [],
-        googleResults: comprehensiveData.additionalData?.googleResults || [],
-        scrapedData: comprehensiveData.socialMedia?.filter(s => s.name) || []
+        ...(comprehensiveData.validation || { valid: false, error: 'Validation unavailable' }),
+        notes: comprehensiveData.notes || []
       };
 
       res.json({

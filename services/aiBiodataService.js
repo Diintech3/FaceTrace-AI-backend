@@ -2,21 +2,29 @@ const axios = require('axios');
 
 class AIBiodataService {
   constructor() {
-    this.apiKey = process.env.OPENROUTER_API_KEY;
-    this.apiUrl = 'https://openrouter.ai/api/v1/chat/completions';
+    this.groqKey = process.env.GROQ_API_KEY;
+    this.openRouterKey = process.env.OPENROUTER_API_KEY;
+    
+    // Prioritize Groq (FREE) over OpenRouter (PAID)
+    this.apiKey = this.groqKey || this.openRouterKey;
+    this.usingGroq = !!this.groqKey;
+    this.apiUrl = this.usingGroq 
+      ? 'https://api.groq.com/openai/v1/chat/completions'
+      : 'https://openrouter.ai/api/v1/chat/completions';
   }
 
   async generateBiodata(profileData) {
     try {
       console.log('[AI Biodata] Starting generation...');
+      console.log('[AI Biodata] Using:', this.usingGroq ? 'Groq (FREE)' : 'OpenRouter (PAID)');
       console.log('[AI Biodata] API Key present:', !!this.apiKey);
       console.log('[AI Biodata] Profiles count:', profileData.profiles?.length || 0);
 
-      if (!this.apiKey || this.apiKey === 'your_openrouter_api_key_here') {
+      if (!this.apiKey) {
         console.error('[AI Biodata] ❌ No valid API key configured');
         return {
           success: false,
-          message: 'OpenRouter API key not configured'
+          message: 'AI API key not configured. Please add GROQ_API_KEY or OPENROUTER_API_KEY to .env'
         };
       }
 
@@ -24,11 +32,11 @@ class AIBiodataService {
       const dataSummary = this.prepareDataSummary(profileData);
       console.log('[AI Biodata] Data summary prepared, length:', dataSummary.length);
 
-      console.log('[AI Biodata] Calling OpenRouter API...');
+      console.log('[AI Biodata] Calling', this.usingGroq ? 'Groq' : 'OpenRouter', 'API...');
       const response = await axios.post(
         this.apiUrl,
         {
-          model: 'openai/gpt-3.5-turbo',
+          model: this.usingGroq ? 'llama-3.3-70b-versatile' : 'openai/gpt-3.5-turbo',
           messages: [
             {
               role: 'user',
@@ -48,14 +56,18 @@ Create a detailed biodata report with these sections:
 
 Format it professionally with clear sections. Include ALL data points found. Be thorough and detailed.`
             }
-          ]
+          ],
+          temperature: 0.3,
+          max_tokens: 2048
         },
         {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': 'http://localhost:3000',
-            'X-Title': 'FaceTrace AI'
+            ...(this.usingGroq ? {} : {
+              'HTTP-Referer': 'http://localhost:3000',
+              'X-Title': 'FaceTrace AI'
+            })
           },
           timeout: 30000
         }
@@ -68,7 +80,7 @@ Format it professionally with clear sections. Include ALL data points found. Be 
       return {
         success: true,
         biodata: biodata,
-        model: 'openai/gpt-3.5-turbo (Paid - ~$0.002/request)'
+        model: this.usingGroq ? 'Llama 3.3 70B (Groq - FREE)' : 'GPT-3.5 Turbo (OpenRouter - PAID)'
       };
     } catch (error) {
       console.error('[AI Biodata] ❌ ERROR:', error.message);
